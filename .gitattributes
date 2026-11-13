@@ -8,3 +8,4 @@
 .gitattributes  export-ignore
 .gitignore      export-ignore
 README.md       export-ignore
+get.ps1         export-ignore
