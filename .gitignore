@@ -1,0 +1,3 @@
+# Ustawienia lokalne (zapamiętany język) i wygenerowane raporty - nie trafiają do repozytorium
+app/SMA-NetCheck.settings.json
+Reports/

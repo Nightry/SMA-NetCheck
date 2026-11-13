@@ -1,0 +1,10 @@
+# Pliki .cmd i .ps1 muszą mieć końce linii Windows (CRLF), także po pobraniu ZIP z GitHub
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+*.json text eol=crlf
+*.txt  text eol=crlf
+
+# Pliki tylko dla repozytorium - nie trafiają do ZIP-a dla instalatorów (Release / Download ZIP)
+.gitattributes  export-ignore
+.gitignore      export-ignore
+README.md       export-ignore
