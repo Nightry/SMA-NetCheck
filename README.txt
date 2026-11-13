@@ -10,8 +10,22 @@ No installation required. Runs on Windows 10 / 11 (Windows PowerShell 5.1).
   HOW TO START
 -------------------------------------------------------------------------------
 
-  1. Download the ZIP (on GitHub: Code -> Download ZIP, or the file from the
-     Releases tab).
+  OPTION A - one command (no manual download)
+
+    Open PowerShell (Start -> type "powershell" -> Enter) and paste:
+
+      irm https://raw.githubusercontent.com/Nightry/SMA-NetCheck/main/get.ps1 | iex
+
+    It downloads the latest release, extracts it to
+    %LOCALAPPDATA%\SMA-NetCheck and starts the program window. Run the same
+    command again next time - it always updates to the latest version.
+    Reports are saved to %LOCALAPPDATA%\SMA-NetCheck\Reports.
+
+  OPTION B - download the ZIP
+
+  1. Download SMA-NetCheck.zip from
+     https://github.com/Nightry/SMA-NetCheck/releases/latest
+     (or on GitHub: Code -> Download ZIP).
 
   2. Extract the WHOLE archive: right-click the ZIP -> "Extract All".
      Do not run the program directly from inside the ZIP.

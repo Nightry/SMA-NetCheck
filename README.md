@@ -5,7 +5,26 @@ No installation required. Runs on Windows 10 / 11 (Windows PowerShell 5.1). User
 
 ## How to start
 
-1. Download the ZIP: **Code → Download ZIP** (or the file from **Releases**).
+### Option A: one command (no manual download)
+
+Open **PowerShell** (Start → type `powershell` → Enter) and paste:
+
+```powershell
+irm https://raw.githubusercontent.com/Nightry/SMA-NetCheck/main/get.ps1 | iex
+```
+
+What the command does:
+- downloads the latest release;
+- extracts it to `%LOCALAPPDATA%\SMA-NetCheck`;
+- starts the program window.
+
+Run the same command again next time; it always updates to the latest version. HTML reports are saved to
+`%LOCALAPPDATA%\SMA-NetCheck\Reports`.
+
+### Option B: download the ZIP
+
+1. Download **SMA-NetCheck.zip** from **[Releases](https://github.com/Nightry/SMA-NetCheck/releases/latest)**
+   (or **Code → Download ZIP**).
 2. Extract the **whole** archive: right-click the ZIP → **Extract All**.
    Do not run the program directly from inside the ZIP.
 3. Double-click **`Start-SMA-NetCheck.cmd`**.
@@ -25,6 +44,7 @@ to the `Reports` folder next to `Start-SMA-NetCheck.cmd` (if it is not writable:
 |---|---|
 | **`Start-SMA-NetCheck.cmd`** | **Double-click: opens the program window** |
 | `README.txt` | The same documentation as plain text (opens in Notepad) |
+| `get.ps1` | Quick-start script used by the one-line command (repository only, not in the ZIP) |
 | `app\SMA-NetCheck-GUI.ps1` | Graphical interface (WPF) |
 | `app\SMA-NetCheck.ps1` | Test script (can also be run with parameters, see below) |
 | `app\SMA-NetCheck.lang.ps1` | PL / EN / DE texts (required) |
