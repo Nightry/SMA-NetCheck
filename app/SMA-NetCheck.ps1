@@ -8,7 +8,7 @@
       1. Połączenie z portalami SMA (DNS, porty TCP, TLS/HTTPS, NTP, inspekcja SSL, proxy).
       2. Osiągalność urządzeń w sieci lokalnej po hostname/IP (DNS, mDNS, NetBIOS/LLMNR,
          ping, ARP/MAC, porty 443/80/502, Speedwire unicast) wraz z analizą podsieci.
-      3. Skanowanie podsieci w poszukiwaniu urządzeń SMA (MAC 00:40:AD + Speedwire discovery).
+      3. Skanowanie podsieci: SMA po nazwie (SMA...), po MAC, Speedwire + lista wszystkich urządzeń.
       4. Multicast Speedwire (239.12.255.254:9522) - Energy Meter / Home Manager / falowniki.
     Generuje raport HTML. Teksty w pliku SMA-NetCheck.lang.ps1 (PL/EN/DE).
 
@@ -26,6 +26,8 @@ param(
     [string[]]$Device,
     # Czas nasłuchu multicast w sekundach (300+ wykrywa problem z IGMP snooping).
     [int]$ListenSeconds = 20,
+    # Własny zakres skanowania (zamiast podsieci karty), np. 192.168.1.1-255, 192.168.1.10-192.168.1.50, 192.168.1.0/24
+    [string]$ScanRange,
     # Ścieżka raportu HTML (domyślnie folder 'Reports' obok skryptu).
     [string]$ReportPath,
     [switch]$NoReport,
@@ -60,7 +62,14 @@ $script:PublicDns      = @('8.8.8.8', '1.1.1.1')
 $script:DnsTestName    = 'ennexos.sunnyportal.com'
 # Strona ze statusem serwerów SMA (awarie / prace serwisowe po stronie SMA)
 $script:StatusPageUrl  = 'https://sunnyportal.statuspage.io/'
-$script:SmaOuiList     = @('00-40-AD')           # prefiksy MAC SMA Solar Technology AG
+# Prefiksy MAC (OUI) z rejestru IEEE: producent -> lista prefiksów.
+# SMA: 00-40-AD (SMA Regelsysteme GmbH - dawna nazwa SMA), 00-15-BB (SMA Solar Technology AG),
+#      AC-19-9F (prefiks używany przez część falowników SMA)
+$script:VendorOui      = [ordered]@{
+    'SMA' = @('00-40-AD', '00-15-BB', 'AC-19-9F')
+}
+# Hostname urządzenia SMA: "SMA" + numer seryjny (np. SMA3012345678). Nie łapie nazw typu "Smart-TV".
+$script:SmaHostPattern = '^sma(?![a-z])'
 $script:SpeedwireGroup = '239.12.255.254'
 $script:SpeedwirePort  = 9522
 $script:LocalTcpPorts  = @(
@@ -235,15 +244,59 @@ function Test-IsIPv4([string]$Text) {
     return ([Net.IPAddress]::TryParse($Text, [ref]$a) -and $a.AddressFamily -eq 'InterNetwork' -and $Text -match '^\d+\.\d+\.\d+\.\d+$')
 }
 
+function Get-IpRangeList([string]$Text, [int]$MaxCount = 1024) {
+    # Zakres IP wpisany ręcznie. Obsługiwane formy (można łączyć przecinkiem / spacją / w nowych liniach):
+    #   192.168.1.1-255   192.168.1.10-192.168.1.50   192.168.1.0/24   192.168.1.20
+    $set = New-Object 'System.Collections.Generic.HashSet[uint32]'
+    $parts = @(([string]$Text) -split '[,;\s]+' | Where-Object { $_ })
+    if ($parts.Count -eq 0) { return [pscustomobject]@{ Ok = $false; IPs = @(); Error = (T 'range.empty') } }
+    foreach ($p in $parts) {
+        $from = $null; $to = $null
+        if ($p -match '^(\d+\.\d+\.\d+\.\d+)/(\d{1,2})$' -and (Test-IsIPv4 $Matches[1]) -and [int]$Matches[2] -le 32) {
+            $pre = [int]$Matches[2]; $m = Get-MaskValue $pre
+            $net = (ConvertTo-UInt32 $Matches[1]) -band $m
+            $bc = $net -bor ([uint32]([uint32]::MaxValue -bxor $m))
+            if ($pre -le 30) { $from = $net + 1; $to = $bc - 1 } else { $from = $net; $to = $bc }
+        } elseif ($p -match '^(\d+\.\d+\.\d+)\.(\d+)-(\d+)$' -and (Test-IsIPv4 "$($Matches[1]).$($Matches[2])") -and [int]$Matches[3] -le 255) {
+            $from = ConvertTo-UInt32 "$($Matches[1]).$($Matches[2])"; $to = ConvertTo-UInt32 "$($Matches[1]).$($Matches[3])"
+        } elseif ($p -match '^(\d+\.\d+\.\d+\.\d+)-(\d+\.\d+\.\d+\.\d+)$' -and (Test-IsIPv4 $Matches[1]) -and (Test-IsIPv4 $Matches[2])) {
+            $from = ConvertTo-UInt32 $Matches[1]; $to = ConvertTo-UInt32 $Matches[2]
+        } elseif (Test-IsIPv4 $p) {
+            $from = ConvertTo-UInt32 $p; $to = $from
+        } else {
+            return [pscustomobject]@{ Ok = $false; IPs = @(); Error = (T 'range.invalid' $p) }
+        }
+        if ($to -lt $from) { return [pscustomobject]@{ Ok = $false; IPs = @(); Error = (T 'range.invalid' $p) } }
+        if (($to - $from + 1) + $set.Count -gt $MaxCount) { return [pscustomobject]@{ Ok = $false; IPs = @(); Error = (T 'range.toobig' $MaxCount) } }
+        for ($v = [uint64]$from; $v -le $to; $v++) { [void]$set.Add([uint32]$v) }
+    }
+    $ips = @($set | Sort-Object | ForEach-Object { ConvertFrom-UInt32 $_ })
+    return [pscustomobject]@{ Ok = $true; IPs = $ips; Error = $null }
+}
+
 function Test-IsPrivateIp([string]$Ip) {
     return ($Ip -match '^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|169\.254\.|0\.0\.0\.0)')
 }
 
-function Test-IsSmaMac([string]$Mac) {
-    if (-not $Mac) { return $false }
+function Get-MacVendor([string]$Mac) {
+    # Zwraca nazwę producenta z $script:VendorOui (np. 'SMA') albo $null
+    if (-not $Mac) { return $null }
     $m = $Mac.ToUpper().Replace(':', '-')
-    foreach ($o in $script:SmaOuiList) { if ($m.StartsWith($o)) { return $true } }
-    return $false
+    foreach ($v in $script:VendorOui.Keys) {
+        foreach ($o in $script:VendorOui[$v]) { if ($m.StartsWith($o)) { return $v } }
+    }
+    return $null
+}
+
+function Test-IsSmaMac([string]$Mac) { return [bool](Get-MacVendor $Mac) }
+
+function Get-VendorOuiText {
+    # np. "SMA 00:40:AD, 00:15:BB, AC:19:9F"
+    (@($script:VendorOui.Keys | ForEach-Object { "$_ " + (($script:VendorOui[$_] | ForEach-Object { $_.Replace('-', ':') }) -join ', ') })) -join '; '
+}
+
+function Test-IsSmaHostName([string]$Name) {
+    return ($Name -and ($Name.Split('.')[0] -match $script:SmaHostPattern))
 }
 
 function Get-SocketErrorText($ErrorObject) {
@@ -606,6 +659,157 @@ function Resolve-Mdns([string]$Name, [string]$LocalIp, [int]$TimeoutMs = 2000) {
     } finally { if ($u) { $u.Close() } }
 }
 
+function Read-DnsNameAt([byte[]]$D, [ref]$Pos) {
+    # Odczyt nazwy DNS z obsługą kompresji (wskaźniki 0xC0); przesuwa $Pos za nazwę
+    $labels = New-Object System.Collections.Generic.List[string]
+    $p = $Pos.Value; $jumped = $false; $guard = 0
+    while ($p -lt $D.Length -and $guard -lt 100) {
+        $guard++
+        $len = [int]$D[$p]
+        if ($len -eq 0) { $p++; break }
+        if (($len -band 0xC0) -eq 0xC0) {
+            if ($p + 1 -ge $D.Length) { break }
+            if (-not $jumped) { $Pos.Value = $p + 2; $jumped = $true }
+            $p = (($len -band 0x3F) -shl 8) -bor [int]$D[$p + 1]
+            continue
+        }
+        if ($p + 1 + $len -gt $D.Length) { break }
+        $labels.Add([Text.Encoding]::UTF8.GetString($D, $p + 1, $len))
+        $p += $len + 1
+    }
+    if (-not $jumped) { $Pos.Value = $p }
+    return ($labels -join '.')
+}
+
+function Get-DnsAnswerPtr([byte[]]$D) {
+    # Zwraca rekordy PTR z odpowiedzi DNS/mDNS: @{ Owner = '50.10.168.192.in-addr.arpa'; Target = 'SMA123.local' }
+    $out = @()
+    if ($D.Length -lt 12) { return $out }
+    $qd = ([int]$D[4] -shl 8) -bor $D[5]
+    $total = (([int]$D[6] -shl 8) -bor $D[7]) + (([int]$D[8] -shl 8) -bor $D[9]) + (([int]$D[10] -shl 8) -bor $D[11])
+    $pos = 12
+    for ($i = 0; $i -lt $qd -and $pos -lt $D.Length; $i++) { [void](Read-DnsNameAt $D ([ref]$pos)); $pos += 4 }
+    for ($i = 0; $i -lt $total -and $pos -lt $D.Length; $i++) {
+        $owner = Read-DnsNameAt $D ([ref]$pos)
+        if ($pos + 10 -gt $D.Length) { break }
+        $type = ([int]$D[$pos] -shl 8) -bor $D[$pos + 1]
+        $rdlen = ([int]$D[$pos + 8] -shl 8) -bor $D[$pos + 9]
+        $pos += 10
+        if ($type -eq 12 -and $pos + $rdlen -le $D.Length) {
+            $rp = $pos
+            $out += [pscustomobject]@{ Owner = $owner; Target = (Read-DnsNameAt $D ([ref]$rp)) }
+        }
+        $pos += $rdlen
+    }
+    return $out
+}
+
+function Resolve-MdnsReverseBatch([string[]]$Ips, [string]$LocalIp, [int]$TimeoutMs = 2500) {
+    # Odwrotne zapytania mDNS (PTR x.x.x.x.in-addr.arpa) do wszystkich adresów naraz.
+    # Urządzenia ogłaszające się przez mDNS (np. SMA ennexOS) podają tak swoją nazwę, nawet gdy router jej nie zna.
+    $names = @{}
+    if (-not $Ips -or $Ips.Count -eq 0) { return $names }
+    $u = $null
+    try {
+        $u = New-Object Net.Sockets.UdpClient((New-Object Net.IPEndPoint([Net.IPAddress]::Parse($LocalIp), 0)))
+        $u.Client.SetSocketOption([Net.Sockets.SocketOptionLevel]::IP, [Net.Sockets.SocketOptionName]::MulticastInterface, ([Net.IPAddress]::Parse($LocalIp)).GetAddressBytes())
+        $grp = New-Object Net.IPEndPoint([Net.IPAddress]::Parse('224.0.0.251'), 5353)
+        foreach ($ip in $Ips) {
+            $o = $ip.Split('.')
+            $q = New-Object System.Collections.Generic.List[byte]
+            $q.AddRange([byte[]](0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0))
+            foreach ($label in @($o[3], $o[2], $o[1], $o[0], 'in-addr', 'arpa')) {
+                $b = [Text.Encoding]::ASCII.GetBytes($label); $q.Add([byte]$b.Length); $q.AddRange($b)
+            }
+            $q.AddRange([byte[]](0, 0, 12, 0x80, 1))   # typ PTR, klasa IN + bit QU (odpowiedź unicast)
+            $bytes = $q.ToArray()
+            try { [void]$u.Send($bytes, $bytes.Length, $grp) } catch { }
+        }
+        $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
+        while ((Get-Date) -lt $deadline) {
+            if ($u.Client.Poll(200000, [Net.Sockets.SelectMode]::SelectRead)) {
+                $ep = New-Object Net.IPEndPoint([Net.IPAddress]::Any, 0)
+                try { $data = $u.Receive([ref]$ep) } catch { continue }
+                foreach ($r in @(Get-DnsAnswerPtr $data)) {
+                    if ($r.Owner -match '^(\d+)\.(\d+)\.(\d+)\.(\d+)\.in-addr\.arpa$') {
+                        $ip = "$($Matches[4]).$($Matches[3]).$($Matches[2]).$($Matches[1])"
+                        if ($r.Target -and -not $names.ContainsKey($ip)) { $names[$ip] = ($r.Target -replace '\.local\.?$', '') }
+                    }
+                }
+            }
+        }
+    } catch { } finally { if ($u) { $u.Close() } }
+    return $names
+}
+
+function Resolve-HostNameBatch([string[]]$Ips, [int]$TimeoutMs = 6000) {
+    # Odwrotne rozwiązywanie nazw (DNS PTR z routera, NetBIOS) równolegle dla wszystkich adresów
+    $names = @{}
+    $jobs = @()
+    foreach ($ip in $Ips) {
+        try { $jobs += [pscustomobject]@{ Ip = $ip; Task = [Net.Dns]::GetHostEntryAsync([Net.IPAddress]::Parse($ip)) } } catch { }
+    }
+    if ($jobs.Count -eq 0) { return $names }
+    try { [void][Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($jobs | ForEach-Object { $_.Task }), $TimeoutMs) } catch { }
+    foreach ($j in $jobs) {
+        if ($j.Task.Status -eq 'RanToCompletion') {
+            $n = [string]$j.Task.Result.HostName
+            if ($n -and $n -ne $j.Ip) { $names[$j.Ip] = $n }
+        }
+    }
+    return $names
+}
+
+# Świeże zapytania ARP (iphlpapi ResolveIpNetEntry2) - działa bez uprawnień administratora.
+# Pozwala sprawdzić, czy urządzenie jest teraz online, nawet gdy blokuje ping.
+if (-not ('SmaNetCheck.Arp' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Net;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+namespace SmaNetCheck {
+    public static class Arp {
+        [DllImport("iphlpapi.dll")]
+        static extern int ResolveIpNetEntry2(byte[] row, IntPtr sourceAddress);
+
+        // Zwraca MAC (AA-BB-CC-DD-EE-FF), gdy urządzenie odpowiedziało na ARP, w przeciwnym razie null
+        public static string Resolve(string ip, int ifIndex) {
+            try {
+                byte[] row = new byte[88];                    // MIB_IPNET_ROW2
+                row[0] = 2;                                   // AF_INET
+                Array.Copy(IPAddress.Parse(ip).GetAddressBytes(), 0, row, 4, 4);
+                BitConverter.GetBytes(ifIndex).CopyTo(row, 28);
+                if (ResolveIpNetEntry2(row, IntPtr.Zero) != 0) return null;
+                if (BitConverter.ToInt32(row, 72) != 6) return null;
+                return BitConverter.ToString(row, 40, 6);
+            } catch { return null; }
+        }
+
+        public static string[] ResolveMany(string[] ips, int ifIndex) {
+            string[] res = new string[ips.Length];
+            Parallel.For(0, ips.Length, new ParallelOptions { MaxDegreeOfParallelism = 32 }, i => { res[i] = Resolve(ips[i], ifIndex); });
+            return res;
+        }
+    }
+}
+'@
+}
+
+function Get-LocalIPv4 {
+    # Wszystkie adresy IPv4 tego komputera - także kart rozłączonych, które zachowały stary adres
+    @(@(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | ForEach-Object { $_.IPAddress }) +
+      @($script:AllAdapters | ForEach-Object { $_.IP }) | Where-Object { $_ } | Select-Object -Unique)
+}
+
+function Get-SubnetNeighbors($Adapter) {
+    # Wpisy z tablicy ARP Windows z poprawnym MAC, w podsieci karty
+    @(Get-NetNeighbor -InterfaceIndex $Adapter.Index -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object { $_.State -notin 'Unreachable', 'Incomplete' -and $_.LinkLayerAddress -and
+                       $_.LinkLayerAddress -notin '00-00-00-00-00-00', 'FF-FF-FF-FF-FF-FF' -and
+                       (Test-IsIPv4 $_.IPAddress) -and (Test-InSubnet $_.IPAddress $Adapter.IP $Adapter.Prefix) })
+}
+
 function Resolve-NetBios([string]$Name) {
     try {
         $r = Resolve-DnsName -Name ($Name.Split('.')[0]) -Type A -LlmnrNetbiosOnly -ErrorAction Stop
@@ -944,14 +1148,15 @@ function Test-LocalDevice([string]$Target) {
     $web = @{}   # ip -> wynik testu HTTPS (interfejs WWW)
     foreach ($ip in @($found.Keys)) {
         $addrName = T 'res.addr' $ip
-        if (@($script:AllAdapters | ForEach-Object { $_.IP }) -contains $ip) {
+        if ((Get-LocalIPv4) -contains $ip) {
             Add-Result $cat $addrName 'WARN' (T 'res.self.d') (T 'res.self.h')
             continue
         }
         $inSub = Test-InSubnet $ip $a.IP $a.Prefix
         $ping = Test-Ping $ip 1000 2
         $mac = if ($inSub) { Get-ArpEntry $ip } else { $null }
-        $isSma = Test-IsSmaMac $mac
+        $vendor = Get-MacVendor $mac
+        $isSma = [bool]$vendor
 
         if ($ip -like '169.254.*') {
             Add-Result $cat $addrName 'FAIL' (T 'res.dev.apipa.d') ((T 'res.dev.apipa.h') + "`n" + (Get-SecondaryIpHint $ip))
@@ -963,7 +1168,7 @@ function Test-LocalDevice([string]$Target) {
             }
         } else {
             if ($ping -and $mac) {
-                $smaFlag = if ($isSma) { ' (SMA)' } else { '' }
+                $smaFlag = if ($isSma) { " ($vendor)" } else { '' }
                 Add-Result $cat $addrName 'OK' (T 'res.dev.ok.mac.d' $ping $mac $smaFlag)
             } elseif ($ping) {
                 Add-Result $cat $addrName 'OK' (T 'res.dev.ok.d' $ping)
@@ -973,7 +1178,7 @@ function Test-LocalDevice([string]$Target) {
                 Add-Result $cat $addrName 'FAIL' (T 'res.dev.none.d') (T 'res.dev.none.h')
             }
             if ($mac -and -not $isSma) {
-                Add-Result $cat (T 'res.vendor' $ip) 'WARN' (T 'res.vendor.d' $mac) (T 'res.vendor.h')
+                Add-Result $cat (T 'res.vendor' $ip) 'WARN' (T 'res.vendor.d' $mac (Get-VendorOuiText)) (T 'res.vendor.h')
             }
         }
 
@@ -1064,6 +1269,8 @@ function Invoke-LocalTest([string[]]$Targets) {
     foreach ($t in $Targets) {
         # Akceptuje też wklejony adres z przeglądarki: https://SMA782354782.local/ -> SMA782354782.local
         $t = (($t.Trim() -replace '^[a-zA-Z]+://', '').Split('/')[0]) -replace ':\d+$', ''
+        # Sam numer seryjny (same cyfry) -> hostname SMA + numer seryjny, np. 782354782 -> SMA782354782
+        if ($t -match '^\d{6,}$') { $t = "SMA$t" }
         if ($t) { Test-LocalDevice $t }
     }
 }
@@ -1071,25 +1278,43 @@ function Invoke-LocalTest([string[]]$Targets) {
 # =====================================================================================
 #  TEST 3: SKANOWANIE PODSIECI
 # =====================================================================================
-function Invoke-SubnetScan {
+function Invoke-SubnetScan([string]$Range) {
+    # $Range = własny zakres IP (opcjonalnie); puste = automatycznie podsieć wybranej karty
     $a = $script:Adapter
     Invoke-AdapterCheck
     Write-Section (T 'sec.scan')
     $cat = T 'cat.scan'
-    $prefix = $a.Prefix
-    if ($prefix -lt 22) {
-        Write-Host (T 'scan.big' $prefix) -ForegroundColor Yellow
-        $prefix = 24
+    $rangeSet = $null
+    if ($Range -and $Range.Trim()) {
+        $r = Get-IpRangeList $Range
+        if (-not $r.Ok) {
+            Add-Result $cat (T 'res.range') 'FAIL' $r.Error (T 'range.examples')
+            return
+        }
+        $label = ($Range.Trim() -split '[,;\s]+' | Where-Object { $_ }) -join ', '
+        $hosts = @($r.IPs | Where-Object { $_ -ne $a.IP })
+        $rangeSet = @{}; foreach ($ip in $r.IPs) { $rangeSet[$ip] = $true }
+        Add-Result $cat (T 'res.range') 'INFO' (T 'res.range.d' $label $r.IPs.Count)
+    } else {
+        $prefix = $a.Prefix
+        if ($prefix -lt 22) {
+            Write-Host (T 'scan.big' $prefix) -ForegroundColor Yellow
+            $prefix = 24
+        }
+        $netStr = Get-NetworkAddress $a.IP $prefix
+        $net = ConvertTo-UInt32 $netStr
+        $count = [math]::Pow(2, 32 - $prefix) - 2
+        $hosts = for ($i = 1; $i -le $count; $i++) { ConvertFrom-UInt32 ([uint32]($net + $i)) }
+        $hosts = @($hosts | Where-Object { $_ -ne $a.IP })
+        $label = "$netStr/$prefix"
     }
-    $netStr = Get-NetworkAddress $a.IP $prefix
-    $net = ConvertTo-UInt32 $netStr
-    $count = [math]::Pow(2, 32 - $prefix) - 2
-    $hosts = for ($i = 1; $i -le $count; $i++) { ConvertFrom-UInt32 ([uint32]($net + $i)) }
-    $hosts = @($hosts | Where-Object { $_ -ne $a.IP })
+    # Urządzenia zapamiętane wcześniej przez Windows (pamięć ARP) - pozwala pokazać też te, które są teraz offline
+    $known = @{}
+    foreach ($n in (Get-SubnetNeighbors $a)) { $known[$n.IPAddress] = $n.LinkLayerAddress }
     $alive = @{}
     $batch = 128
     for ($i = 0; $i -lt $hosts.Count; $i += $batch) {
-        $st = T 'status.scan' "$netStr/$prefix" $i $hosts.Count
+        $st = T 'status.scan' $label $i $hosts.Count
         Write-Progress -Activity 'Ping sweep' -Status $st -PercentComplete ([int](100 * $i / $hosts.Count))
         Set-NcStatus $st ([int](100 * $i / $hosts.Count))
         $chunk = $hosts[$i..([math]::Min($i + $batch, $hosts.Count) - 1)]
@@ -1105,7 +1330,7 @@ function Invoke-SubnetScan {
         }
     }
     Write-Progress -Activity 'Ping sweep' -Completed
-    Add-Result $cat (T 'res.sweep') 'INFO' (T 'res.sweep.d' $alive.Count "$netStr/$prefix")
+    Add-Result $cat (T 'res.sweep') 'INFO' (T 'res.sweep.d' $alive.Count $label)
 
     # Speedwire discovery (multicast) - łapie też urządzenia z adresem spoza podsieci
     $sw = @{}
@@ -1124,45 +1349,129 @@ function Invoke-SubnetScan {
         Add-Result $cat (T 'res.swdisc') 'INFO' (T 'res.swdisc.err.d' (Get-SocketErrorText $_)) (T 'res.swdisc.err.h')
     } finally { if ($sock) { $sock.Close() } }
 
-    # ARP - urządzenia SMA po prefiksie MAC
-    $arp = @(Get-NetNeighbor -InterfaceIndex $a.Index -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-        Where-Object { $_.State -notin 'Unreachable', 'Incomplete' -and (Test-IsSmaMac $_.LinkLayerAddress) })
-    $devices = @{}
-    foreach ($n in $arp) { $devices[$n.IPAddress] = [ordered]@{ IP = $n.IPAddress; MAC = $n.LinkLayerAddress; Ping = $alive[$n.IPAddress]; Speedwire = $sw[$n.IPAddress] } }
-    foreach ($ip in $sw.Keys) {
-        if (-not $devices.ContainsKey($ip)) { $devices[$ip] = [ordered]@{ IP = $ip; MAC = (Get-ArpEntry $ip); Ping = $alive[$ip]; Speedwire = $sw[$ip] } }
+    # --- Wszystkie urządzenia: tablica ARP (przed i po ping sweep) + odpowiedzi ping + Speedwire ---
+    $own = Get-LocalIPv4
+    $all = @{}   # ip -> dane urządzenia
+    foreach ($n in (Get-SubnetNeighbors $a)) { $all[$n.IPAddress] = [ordered]@{ IP = $n.IPAddress; MAC = $n.LinkLayerAddress } }
+    foreach ($ip in $known.Keys) {
+        if (-not $all.ContainsKey($ip)) { $all[$ip] = [ordered]@{ IP = $ip; MAC = $known[$ip] } }
+    }
+    foreach ($ip in @($alive.Keys) + @($sw.Keys)) {
+        if (-not $all.ContainsKey($ip)) { $all[$ip] = [ordered]@{ IP = $ip; MAC = (Get-ArpEntry $ip) } }
+    }
+    foreach ($ip in $own) { $all.Remove($ip) }
+    # Własny zakres: tylko adresy z zakresu (oraz urządzenia, które odpowiedziały na Speedwire)
+    if ($rangeSet) {
+        foreach ($ip in @($all.Keys)) { if (-not $rangeSet.ContainsKey($ip) -and -not $sw.ContainsKey($ip)) { $all.Remove($ip) } }
     }
 
-    if ($devices.Count -eq 0) {
-        Add-Result $cat (T 'res.smadev') 'FAIL' (T 'res.smadev.none.d') (T 'res.smadev.none.h')
-        return
+    # --- Online / offline: odpowiedź na ping, Speedwire albo świeże zapytanie ARP (gdy ping jest blokowany) ---
+    Set-NcStatus (T 'status.online' $all.Count)
+    Write-Host (T 'status.online' $all.Count) -ForegroundColor DarkGray
+    $toArp = @($all.Keys | Where-Object { -not $alive.ContainsKey($_) -and -not $sw.ContainsKey($_) -and (Test-InSubnet $_ $a.IP $a.Prefix) })
+    $arpOk = @{}
+    if ($toArp.Count -gt 0) {
+        $macs = [SmaNetCheck.Arp]::ResolveMany([string[]]$toArp, [int]$a.Index)
+        for ($i = 0; $i -lt $toArp.Count; $i++) { if ($macs[$i]) { $arpOk[$toArp[$i]] = $macs[$i] } }
     }
-    foreach ($d in ($devices.Values | Sort-Object { ConvertTo-UInt32 $_.IP })) {
-        $name = ''
-        try {
-            $ptr = @{ Name = $d.IP; Type = 'PTR'; QuickTimeout = $true; ErrorAction = 'Stop' }
-            $dns4 = @($a.Dns | Where-Object { Test-IsIPv4 $_ }) | Select-Object -First 1
-            if ($dns4) { $ptr.Server = $dns4 }
-            $name = (Resolve-DnsName @ptr | Where-Object { $_.Type -eq 'PTR' } | Select-Object -First 1).NameHost
-        } catch { }
-        if (-not $name) { try { $name = ([Net.Dns]::GetHostEntry($d.IP)).HostName } catch { } }
-        if ($name -eq $d.IP) { $name = '' }
-        $inSub = Test-InSubnet $d.IP $a.IP $a.Prefix
+    foreach ($d in $all.Values) {
+        $d.Online = ($alive.ContainsKey($d.IP) -or $sw.ContainsKey($d.IP) -or $arpOk.ContainsKey($d.IP))
+        if ($arpOk[$d.IP]) { $d.MAC = $arpOk[$d.IP] }
+    }
+    # Urządzenie offline, którego MAC jest teraz online pod innym adresem = zmiana adresu IP
+    $onlineByMac = @{}
+    foreach ($d in $all.Values) { if ($d.Online -and $d.MAC) { $onlineByMac[$d.MAC] = $d.IP } }
+    foreach ($d in $all.Values) { $d.MovedTo = if (-not $d.Online -and $d.MAC) { $onlineByMac[$d.MAC] } else { $null } }
+
+    # --- Nazwy hostów: mDNS (nazwa ogłaszana przez urządzenie) oraz DNS/NetBIOS (nazwa z routera) ---
+    Set-NcStatus (T 'status.names' $all.Count)
+    Write-Host (T 'status.names' $all.Count) -ForegroundColor DarkGray
+    $ipList = @($all.Keys)
+    $mdnsNames = Resolve-MdnsReverseBatch $ipList $a.IP
+    $dnsNames = Resolve-HostNameBatch $ipList
+    foreach ($d in $all.Values) {
+        $d.Ping      = $alive[$d.IP]
+        $d.Speedwire = $sw[$d.IP]
+        $d.Vendor    = Get-MacVendor $d.MAC
+        $d.Name      = ''; $d.NameSrc = ''
+        if ($mdnsNames[$d.IP])    { $d.Name = $mdnsNames[$d.IP]; $d.NameSrc = 'mDNS' }
+        elseif ($dnsNames[$d.IP]) { $d.Name = $dnsNames[$d.IP];  $d.NameSrc = 'DNS/NetBIOS' }
+        $d.SmaName   = Test-IsSmaHostName $d.Name
+    }
+    # Najpierw urządzenia online, potem offline; w każdej grupie według adresu IP
+    $sorted = @($all.Values | Sort-Object @{ e = { if ($_.Online) { 0 } else { 1 } } }, @{ e = { ConvertTo-UInt32 $_.IP } })
+    $online = @($sorted | Where-Object { $_.Online }).Count
+
+    # Jak urządzenie odpowiedziało (albo że nie odpowiada)
+    $respText = {
+        param($d)
+        if ($null -ne $d.Ping)  { return (T 'scan.resp.ping' $d.Ping) }
+        if ($d.Speedwire)       { return (T 'scan.resp.sw') }
+        if ($d.Online)          { return (T 'scan.resp.arp') }
+        if ($d.MovedTo)         { return (T 'scan.resp.moved' $d.MovedTo) }
+        return (T 'scan.resp.none')
+    }
+
+    # Opis i ocena urządzenia SMA (podsieć, APIPA)
+    $describe = {
+        param($d)
+        $macTxt  = if ($d.MAC) { $d.MAC + $(if ($d.Vendor) { " ($($d.Vendor))" } else { '' }) } else { '?' }
         $pingTxt = if ($null -ne $d.Ping) { T 'word.ms' $d.Ping } else { T 'word.none' }
-        $swTxt = if ($d.Speedwire) { $d.Speedwire } else { T 'word.noresp' }
-        $nameTxt = if ($name) { T 'scan.name' $name } else { '' }
-        $macTxt = if ($d.MAC) { $d.MAC } else { '?' }
-        $detail = T 'scan.detail' $macTxt $pingTxt $swTxt $nameTxt
-        $devName = T 'res.smaAt' $d.IP
-        if ($d.IP -like '169.254.*') {
-            Add-Result $cat $devName 'FAIL' $detail ((T 'res.dev.apipa.h') + "`n" + (Get-SecondaryIpHint $d.IP))
-        } elseif (-not $inSub) {
-            Add-Result $cat $devName 'FAIL' ($detail + ' - ' + (T 'scan.outside' $a.Network $a.Prefix)) ((T 'scan.outside.h') + "`n" + (Get-SecondaryIpHint $d.IP))
+        $swTxt   = if ($d.Speedwire) { $d.Speedwire } else { T 'word.noresp' }
+        $nameTxt = if ($d.Name) { T 'scan.name' "$($d.Name) ($($d.NameSrc))" } else { '' }
+        T 'scan.detail' $d.IP $macTxt $pingTxt $swTxt $nameTxt
+    }
+    $report = {
+        param($c, $title, $d)
+        $detail = & $describe $d
+        if (-not $d.Online) {
+            $st = if ($d.MovedTo) { 'INFO' } else { 'WARN' }
+            Add-Result $c "$title - $(T 'word.offline')" $st ($detail + ' - ' + (& $respText $d)) (T 'scan.offline.h')
+        } elseif ($d.IP -like '169.254.*') {
+            Add-Result $c $title 'FAIL' $detail ((T 'res.dev.apipa.h') + "`n" + (Get-SecondaryIpHint $d.IP))
+        } elseif (-not (Test-InSubnet $d.IP $a.IP $a.Prefix)) {
+            Add-Result $c $title 'FAIL' ($detail + ' - ' + (T 'scan.outside' $a.Network $a.Prefix)) ((T 'scan.outside.h') + "`n" + (Get-SecondaryIpHint $d.IP))
         } else {
-            Add-Result $cat $devName 'OK' $detail
+            Add-Result $c $title 'OK' $detail
         }
     }
-    Add-Result $cat (T 'res.scanSum') 'INFO' (T 'res.scanSum.d' $devices.Count) (T 'res.scanSum.h')
+
+    # Wyniki SMA trafiają do jednej grupy "Skanowanie"
+    # 1) Urządzenia z nazwą SMA... (SMA + numer seryjny)
+    $byName = @($sorted | Where-Object { $_.SmaName })
+    foreach ($d in $byName) { & $report $cat (T 'res.scan.byname' $d.Name) $d }
+    if ($byName.Count -eq 0) { Add-Result $cat (T 'res.scan.name.none') 'INFO' (T 'res.scan.name.none.d') (T 'res.scan.name.none.h') }
+
+    # 2) Urządzenia po prefiksie MAC SMA
+    $byMac = @($sorted | Where-Object { $_.Vendor })
+    foreach ($d in $byMac) { & $report $cat (T 'res.scan.bymac' $d.IP) $d }
+    if ($byMac.Count -eq 0) { Add-Result $cat (T 'res.scan.mac.none') 'INFO' (T 'res.scan.mac.none.d' (Get-VendorOuiText)) (T 'res.scan.mac.none.h') }
+
+    # 3) Urządzenia znalezione tylko przez Speedwire (np. z adresem spoza podsieci)
+    $swOnly = @($sorted | Where-Object { $_.Speedwire -and -not $_.SmaName -and -not $_.Vendor })
+    if ($swOnly.Count -gt 0) {
+        foreach ($d in $swOnly) { & $report $cat (T 'res.scan.bysw' $d.IP) $d }
+    }
+
+    # 4) Lista wszystkich urządzeń w sieci
+    $catAll = T 'cat.scan.all'
+    foreach ($d in $sorted) {
+        $isSmaDev = [bool]($d.SmaName -or $d.Vendor -or $d.Speedwire)
+        $macTxt  = if ($d.MAC) { $d.MAC } else { '?' }
+        $vendTxt = if ($d.Vendor) { " ($($d.Vendor))" } else { '' }
+        $nameTxt = if ($d.Name) { $d.Name } else { '-' }
+        $state   = if ($d.Online) { T 'word.online' } else { T 'word.offline' }
+        $title   = "$($d.IP) - $state" + $(if ($isSmaDev) { '  [SMA]' } else { '' })
+        # online = OK (zielony); offline urządzenia SMA = UWAGA; offline pozostałych = INFO
+        $st = if ($d.Online) { 'OK' } elseif ($isSmaDev -and -not $d.MovedTo) { 'WARN' } else { 'INFO' }
+        Add-Result $catAll $title $st (T 'scan.all.d' $macTxt $vendTxt $nameTxt (& $respText $d))
+    }
+
+    $smaCount = @($sorted | Where-Object { $_.SmaName -or $_.Vendor -or $_.Speedwire }).Count
+    if ($smaCount -eq 0) {
+        Add-Result $cat (T 'res.smadev') 'FAIL' (T 'res.smadev.none.d') (T 'res.smadev.none.h')
+    }
+    Add-Result $cat (T 'res.scanSum') 'INFO' (T 'res.scanSum.d' $sorted.Count $online ($sorted.Count - $online) $byName.Count $byMac.Count $swOnly.Count) (T 'res.scanSum.h')
 }
 
 # =====================================================================================
@@ -1356,11 +1665,11 @@ function Show-Menu {
             '1' { $sel = Select-Adapter -Ask; if ($sel) { $script:Adapter = $sel } }
             '2' { Invoke-PortalTest }
             '3' { Invoke-LocalTest @() }
-            '4' { Invoke-SubnetScan }
+            '4' { Invoke-SubnetScan $ScanRange }
             '5' { Invoke-MulticastTest $ListenSeconds }
             '6' {
                 $d = Read-Host (T 'prompt.devicesFull')
-                Invoke-PortalTest; Invoke-SubnetScan; Invoke-MulticastTest $ListenSeconds
+                Invoke-PortalTest; Invoke-SubnetScan $ScanRange; Invoke-MulticastTest $ListenSeconds
                 $list = @($d -split '[,;\s]+' | Where-Object { $_ })
                 if ($list.Count -gt 0) { Invoke-LocalTest $list }
                 Show-Summary
@@ -1399,10 +1708,10 @@ try {
         'Menu'      { Show-Menu }
         'Portal'    { Invoke-PortalTest }
         'Local'     { Invoke-LocalTest $Device }
-        'Scan'      { Invoke-SubnetScan }
+        'Scan'      { Invoke-SubnetScan $ScanRange }
         'Multicast' { Invoke-MulticastTest $ListenSeconds }
         'Full'      {
-            Invoke-PortalTest; Invoke-SubnetScan; Invoke-MulticastTest $ListenSeconds
+            Invoke-PortalTest; Invoke-SubnetScan $ScanRange; Invoke-MulticastTest $ListenSeconds
             if ($Device) { Invoke-LocalTest $Device }
         }
     }

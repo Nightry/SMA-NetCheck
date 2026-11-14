@@ -85,6 +85,27 @@ namespace SmaNetCheck {
     <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
       <Setter Property="Background" Value="#C62828"/>
     </Style>
+    <!-- Przyciski-linki w nagłówku: przezroczyste, podświetlane po najechaniu -->
+    <Style x:Key="HeaderLink" TargetType="Button">
+      <Setter Property="Foreground" Value="#D6E4F5"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Padding" Value="10,6"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+              <ContentPresenter VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="#1C4B85"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="b" Property="Background" Value="#245A9E"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter TargetName="b" Property="Opacity" Value="0.4"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
 
     <Style TargetType="CheckBox">
       <Setter Property="Margin" Value="0,5"/>
@@ -117,13 +138,17 @@ namespace SmaNetCheck {
           </StackPanel>
         </StackPanel>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-          <Button x:Name="BtnStatus" Tag="L:gui.statusPage" Style="{StaticResource GhostButton}" Margin="0,0,14,0" Padding="12,6"/>
+          <!-- Linki: status serwerów, informacje o programie -->
+          <Button x:Name="BtnStatus" Tag="L:gui.statusPage" Style="{StaticResource HeaderLink}"/>
+          <Button x:Name="BtnAbout" Tag="L:gui.about" Style="{StaticResource HeaderLink}" Margin="4,0,0,0"/>
+          <Border Width="1" Height="26" Background="#2E4E7A" Margin="14,0" VerticalAlignment="Center"/>
+          <!-- Ustawienia: język, uprawnienia -->
           <TextBlock Text="&#x1F310;" FontFamily="Segoe UI Emoji" FontSize="15" Foreground="#A9C1DD" VerticalAlignment="Center" Margin="0,0,6,0"/>
           <ComboBox x:Name="CmbLang" Width="120" Height="28" VerticalContentAlignment="Center" Margin="0,0,14,0"/>
           <Border x:Name="AdminBadge" CornerRadius="11" Padding="12,4" Background="#2E7D32" VerticalAlignment="Center">
             <TextBlock x:Name="AdminText" Foreground="White" FontSize="11" FontWeight="SemiBold"/>
           </Border>
-          <Button x:Name="BtnElevate" Tag="L:gui.elevate" Style="{StaticResource GhostButton}" Margin="10,0,0,0" Padding="12,6"/>
+          <Button x:Name="BtnElevate" Tag="L:gui.elevate" Style="{StaticResource GhostButton}" Padding="12,6"/>
         </StackPanel>
       </Grid>
     </Border>
@@ -148,7 +173,12 @@ namespace SmaNetCheck {
         <ColumnDefinition Width="*"/>
       </Grid.ColumnDefinitions>
 
-      <!-- Lewy panel -->
+      <!-- Lewy panel: przewijane ustawienia + przyciski zawsze widoczne na dole -->
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="*"/>
+          <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
       <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel>
           <Border Style="{StaticResource Card}">
@@ -173,19 +203,26 @@ namespace SmaNetCheck {
               <CheckBox x:Name="ChkPortal" IsChecked="True">
                 <StackPanel Margin="4,-2,0,0">
                   <TextBlock Tag="L:gui.portal" FontWeight="SemiBold"/>
-                  <TextBlock Tag="L:gui.portal.d" FontSize="11" Foreground="#7A8694"/>
+                  <TextBlock Tag="L:gui.portal.d" FontSize="11" Foreground="#0B5FA5" TextWrapping="Wrap"/>
                 </StackPanel>
               </CheckBox>
               <CheckBox x:Name="ChkScan" IsChecked="True">
                 <StackPanel Margin="4,-2,0,0">
                   <TextBlock Tag="L:gui.scan" FontWeight="SemiBold"/>
-                  <TextBlock Tag="L:gui.scan.d" FontSize="11" Foreground="#7A8694"/>
+                  <TextBlock Tag="L:gui.scan.d" FontSize="11" Foreground="#0B5FA5" TextWrapping="Wrap"/>
                 </StackPanel>
               </CheckBox>
+              <StackPanel Margin="22,0,0,6">
+                <CheckBox x:Name="ChkRange" Margin="0,2">
+                  <TextBlock Tag="L:gui.range" Margin="4,-1,0,0" FontSize="12" Foreground="#4A5563"/>
+                </CheckBox>
+                <TextBox x:Name="TxtRange" Margin="0,2,0,0" FontFamily="Consolas" IsEnabled="False"/>
+                <TextBlock Tag="L:gui.range.hint" FontSize="11" Foreground="#0B5FA5" TextWrapping="Wrap" Margin="0,2,0,0"/>
+              </StackPanel>
               <CheckBox x:Name="ChkMulticast" IsChecked="True">
                 <StackPanel Margin="4,-2,0,0">
                   <TextBlock Tag="L:gui.mc" FontWeight="SemiBold"/>
-                  <TextBlock Tag="L:gui.mc.d" FontSize="11" Foreground="#7A8694"/>
+                  <TextBlock Tag="L:gui.mc.d" FontSize="11" Foreground="#0B5FA5" TextWrapping="Wrap"/>
                 </StackPanel>
               </CheckBox>
               <StackPanel Orientation="Horizontal" Margin="22,2,0,6">
@@ -195,8 +232,7 @@ namespace SmaNetCheck {
               <CheckBox x:Name="ChkDevices">
                 <StackPanel Margin="4,-2,0,0">
                   <TextBlock Tag="L:gui.devices" FontWeight="SemiBold"/>
-                  <TextBlock Tag="L:gui.devices.d" FontSize="11" Foreground="#7A8694"/>
-                  <TextBlock Tag="L:gui.devices.note" FontSize="11" Foreground="#0B5FA5" TextWrapping="Wrap"/>
+                  <TextBlock Tag="L:gui.devices.d" FontSize="11" Foreground="#0B5FA5" TextWrapping="Wrap"/>
                 </StackPanel>
               </CheckBox>
               <TextBox x:Name="TxtDevices" Margin="22,4,0,0" Height="74" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
@@ -211,11 +247,13 @@ namespace SmaNetCheck {
               </CheckBox>
             </StackPanel>
           </Border>
-
-          <Button x:Name="BtnRun" Tag="L:gui.run" Style="{StaticResource PrimaryButton}" Margin="0,14,0,0" FontSize="14" Height="44"/>
-          <Button x:Name="BtnStop" Tag="L:gui.stop" Style="{StaticResource DangerButton}" Margin="0,8,0,0" Height="34" IsEnabled="False"/>
         </StackPanel>
       </ScrollViewer>
+        <StackPanel Grid.Row="1">
+          <Button x:Name="BtnRun" Tag="L:gui.run" Style="{StaticResource PrimaryButton}" Margin="0,12,0,0" FontSize="14" Height="44"/>
+          <Button x:Name="BtnStop" Tag="L:gui.stop" Style="{StaticResource DangerButton}" Margin="0,8,0,0" Height="34" IsEnabled="False"/>
+        </StackPanel>
+      </Grid>
 
       <!-- Prawy panel -->
       <Grid Grid.Column="2">
@@ -405,7 +443,7 @@ namespace SmaNetCheck {
         $AddFirewallRule = $o.Firewall
         try {
             if ($o.Portal)    { Invoke-PortalTest }
-            if ($o.Scan)      { Invoke-SubnetScan }
+            if ($o.Scan)      { Invoke-SubnetScan $o.Range }
             if ($o.Multicast) { Invoke-MulticastTest $o.Seconds }
             if ($o.Devices.Count -gt 0) { Invoke-LocalTest $o.Devices }
         } finally {
@@ -514,6 +552,8 @@ namespace SmaNetCheck {
         $ui.CmbLang.ToolTip = T 'gui.lang.tip'
         $ui.BtnRefresh.ToolTip = T 'gui.refresh.tip'
         $ui.BtnStatus.ToolTip = (T 'gui.statusPage.tip') + "`n" + $script:StatusPageUrl
+        $ui.BtnAbout.ToolTip = T 'gui.about.tip'
+        $ui.BtnElevate.ToolTip = (T 'gui.notadmin') + ". " + (T 'gui.elevate.tip')
         $ui.ChkFirewall.ToolTip = if ($script:IsAdmin) { $null } else { T 'gui.fw.tip' }
         # Czas nasłuchu
         $sel = [Math]::Max(0, $ui.CmbSeconds.SelectedIndex)
@@ -554,8 +594,9 @@ namespace SmaNetCheck {
 
     function Set-Busy([bool]$Busy) {
         $script:busy = $Busy
-        foreach ($c in 'BtnRun', 'CmbAdapter', 'BtnRefresh', 'ChkPortal', 'ChkScan', 'ChkMulticast', 'ChkDevices', 'TxtDevices','CmbSeconds', 'BtnClear', 'BtnElevate', 'CmbLang') { $ui[$c].IsEnabled = -not $Busy }
+        foreach ($c in 'BtnRun', 'CmbAdapter', 'BtnRefresh', 'ChkPortal', 'ChkScan', 'ChkMulticast', 'ChkDevices', 'TxtDevices', 'ChkRange', 'CmbSeconds', 'BtnClear', 'BtnElevate', 'CmbLang') { $ui[$c].IsEnabled = -not $Busy }
         $ui.ChkFirewall.IsEnabled = (-not $Busy) -and $script:IsAdmin
+        $ui.TxtRange.IsEnabled = (-not $Busy) -and [bool]$ui.ChkRange.IsChecked
         $ui.BtnStop.IsEnabled = $Busy
         $ui.Progress.Visibility = if ($Busy) { 'Visible' } else { 'Hidden' }
         $window.Cursor = if ($Busy) { [Windows.Input.Cursors]::AppStarting } else { $null }
@@ -576,6 +617,18 @@ namespace SmaNetCheck {
             Portal = [bool]$ui.ChkPortal.IsChecked; Scan = [bool]$ui.ChkScan.IsChecked
             Multicast = [bool]$ui.ChkMulticast.IsChecked; Seconds = [int]$ui.CmbSeconds.SelectedItem.Tag
             Devices = $devices; Firewall = [bool]$ui.ChkFirewall.IsChecked
+            Range = ''
+        }
+        # Własny zakres IP skanowania (opcjonalnie) - sprawdzany przed startem
+        if ($opts.Scan -and $ui.ChkRange.IsChecked) {
+            $rt = $ui.TxtRange.Text.Trim()
+            if (-not $rt) { Show-Msg 'gui.msg.enterRange'; $ui.TxtRange.Focus(); return }
+            $rc = Get-IpRangeList $rt
+            if (-not $rc.Ok) {
+                [void][Windows.MessageBox]::Show(($rc.Error + "`n`n" + (T 'range.examples')), 'SMA NetCheck', 'OK', 'Warning')
+                $ui.TxtRange.Focus(); return
+            }
+            $opts.Range = $rt
         }
         if ($ui.ChkDevices.IsChecked -and $devices.Count -eq 0) { Show-Msg 'gui.msg.enterDevice'; return }
         if (-not ($opts.Portal -or $opts.Scan -or $opts.Multicast -or $devices.Count -gt 0)) { Show-Msg 'gui.msg.selectTest'; return }
@@ -661,7 +714,8 @@ namespace SmaNetCheck {
         $ui.BtnElevate.Visibility = 'Collapsed'
         $ui.ChkFirewall.IsChecked = $true
     } else {
-        $ui.AdminBadge.Background = '#5C6B7A'
+        # Bez uprawnień: zamiast szarej plakietki wystarczy przycisk "Uruchom jako administrator"
+        $ui.AdminBadge.Visibility = 'Collapsed'
         $ui.ChkFirewall.IsEnabled = $false
     }
 
@@ -676,9 +730,20 @@ namespace SmaNetCheck {
     $ui.CmbAdapter.Add_SelectionChanged({ Show-AdapterInfo })
     $ui.BtnRefresh.Add_Click({ Update-Adapters; Show-AdapterInfo })
     $ui.ChkDevices.Add_Checked({ $ui.TxtDevices.Focus() })
+    $ui.ChkRange.Add_Checked({ $ui.TxtRange.IsEnabled = $true; $ui.ChkScan.IsChecked = $true; [void]$ui.TxtRange.Focus() })
+    $ui.ChkRange.Add_Unchecked({ $ui.TxtRange.IsEnabled = $false })
     $ui.TxtDevices.Add_TextChanged({ if ($ui.TxtDevices.Text.Trim()) { $ui.ChkDevices.IsChecked = $true } })
     $ui.BtnRun.Add_Click({ Start-Run })
     $ui.BtnStatus.Add_Click({ try { Start-Process $script:StatusPageUrl } catch { } })
+    $ui.BtnAbout.Add_Click({
+        # README.txt leży obok Start-SMA-NetCheck.cmd (folder nad "app"); gdy go brak - README na GitHub
+        $readme = @((Join-Path (Split-Path $PSScriptRoot -Parent) 'README.txt'), (Join-Path $PSScriptRoot 'README.txt')) | Where-Object { Test-Path $_ } | Select-Object -First 1
+        try {
+            if ($readme) { Start-Process -FilePath $readme } else { Start-Process 'https://github.com/Nightry/SMA-NetCheck#readme' }
+        } catch {
+            try { Start-Process -FilePath 'notepad.exe' -ArgumentList "`"$readme`"" } catch { }
+        }
+    })
     $ui.BtnStop.Add_Click({
         if ($script:ps) {
             $script:stopReq = $true
