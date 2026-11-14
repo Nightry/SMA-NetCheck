@@ -68,8 +68,11 @@ No installation required. Runs on Windows 10 / 11 (Windows PowerShell 5.1).
     - network adapter selection and its details (Cable / Wi-Fi / VPN /
       no gateway / APIPA),
     - test selection and multicast listening time (20 s - 10 min),
-    - device list: hostname or IP address, one per line
-      (hostname in the form SMA + serial number, e.g. SMA782354782),
+    - optional "Custom IP range" for the network scan, e.g. 192.168.1.1-255,
+      192.168.1.10-192.168.1.50 or 192.168.1.0/24 (up to 1024 addresses);
+      if not ticked, the subnet of the selected adapter is scanned,
+    - device list: IP address or serial number, one per line
+      (782354782 and SMA782354782 both work),
     - temporary Windows Firewall rule (administrator only).
 
   Right panel:
@@ -84,7 +87,9 @@ No installation required. Runs on Windows 10 / 11 (Windows PowerShell 5.1).
     - Copy results              copies text to the clipboard (e.g. for a
                                 ticket or e-mail),
     - Save HTML report          saves the report,
-    - Restart as administrator  (in the window header),
+    - About                     (in the window header) opens README.txt,
+    - Run as administrator      (in the window header, shown only without
+                                administrator rights),
     - SMA server status         (in the window header) opens
                                 https://sunnyportal.statuspage.io/
                                 - current outages and maintenance on the SMA
@@ -139,13 +144,29 @@ No installation required. Runs on Windows 10 / 11 (Windows PowerShell 5.1).
        "only SMA blocked",
      - link to the SMA server status page.
 
-  2. Network scan
-     Ping of every address in the subnet (up to /22), ARP table (SMA MAC
-     prefix 00:40:AD) and Speedwire discovery (multicast). Discovery also
-     finds devices in the same network segment that have an IP address from
-     ANOTHER subnet - a typical reason why the master does not see a device.
+  2. Network scan (or the custom IP range)
+     Ping of every address in the subnet (up to /22), ARP table, Speedwire
+     discovery (multicast) and the name of every device found (mDNS - the
+     name the device announces itself, DNS / NetBIOS - the name registered
+     in the router). SMA devices found in three ways are shown together
+     in the "Scan" group, followed by the list of all devices:
+     - SMA by name: hostname starting with SMA followed by a non-letter,
+       e.g. SMA782354782 (names like "Smart-TV" are not matched),
+     - SMA by MAC address: SMA prefixes 00:40:AD, 00:15:BB (IEEE registry)
+       and AC:19:9F (used by some SMA inverters),
+     - SMA via Speedwire only: also finds devices in the same network
+       segment that have an IP address from ANOTHER subnet - a typical
+       reason why the master does not see a device,
+     - all devices in the network: IP, MAC, vendor, name and current state:
+         online  - answers now (ping, Speedwire or a fresh ARP request,
+                   so devices that block ping are detected too),
+         offline - remembered by Windows from earlier (ARP cache), but does
+                   not answer now; if the same MAC is online at another
+                   address, the device got a new IP address.
+       Online devices are listed first. Offline SMA devices are also marked
+       in the SMA lists.
 
-  3. Speedwire multicast
+  3. Multicast
      Joins the group 239.12.255.254:9522, sends discovery and listens.
      Shows:
      - Energy Meter / Sunny Home Manager 2.0 with serial number, packet count
@@ -157,10 +178,10 @@ No installation required. Runs on Windows 10 / 11 (Windows PowerShell 5.1).
      - Windows Firewall state and network profile (in the Public profile a
        false negative is possible).
 
-  4. Devices in the local network (hostname / IP)
+  4. Devices in the local network (IP / serial number)
      - name resolution via DNS, mDNS (.local) and NetBIOS/LLMNR, detecting
        inconsistent (stale) entries,
-     - subnet, APIPA, ping and ARP/MAC (prefix 00:40:AD = SMA),
+     - subnet, APIPA, ping and ARP/MAC (SMA prefix, see above),
      - ports 443, 80, 502 and a Speedwire request to the device,
      - web interface (HTTPS) at every address the browser can use to open it:
            https://192.168.x.x
@@ -234,7 +255,8 @@ No installation required. Runs on Windows 10 / 11 (Windows PowerShell 5.1).
 
   -Mode       Menu | Portal | Local | Scan | Multicast | Full
   -Interface  adapter alias, index or IP
-  Other:      -Device, -ListenSeconds, -AddFirewallRule (as administrator),
+  Other:      -Device, -ScanRange (custom scan range), -ListenSeconds,
+              -AddFirewallRule (as administrator),
               -Language PL|EN|DE, -ReportPath, -NoReport
 
   EXE version (optional) - with the PS2EXE module:

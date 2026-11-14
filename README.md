@@ -18,8 +18,7 @@ What the command does:
 - extracts it to `%LOCALAPPDATA%\SMA-NetCheck`;
 - starts the program window.
 
-Run the same command again next time; it always updates to the latest version. HTML reports are saved to
-`%LOCALAPPDATA%\SMA-NetCheck\Reports`.
+Run the same command again next time; it always updates to the latest version.
 
 ### Option B: download the ZIP
 
@@ -32,8 +31,7 @@ Run the same command again next time; it always updates to the latest version. H
 > If Windows warns about a file from the Internet, choose **Run**. To avoid the warning, right-click the ZIP
 > before extracting → **Properties** → tick **Unblock** → OK.
 
-The `app` folder contains the program files, so there is no need to open anything in it. HTML reports are saved
-to the `Reports` folder next to `Start-SMA-NetCheck.cmd` (if it is not writable: Desktop or `%TEMP%`).
+The `app` folder contains the program files, so there is no need to open anything in it.
 
 > The `.ps1` files cannot be started with right-click → **Run with PowerShell**, because Windows blocks scripts
 > by default. Always use `Start-SMA-NetCheck.cmd`.
@@ -58,7 +56,10 @@ The whole folder (start file + `app`) can be copied, for example to a USB stick.
 - **Left panel:**
   - network adapter selection and its details (Cable / Wi-Fi / VPN / no gateway / APIPA);
   - test selection and multicast listening time (20 s – 10 min);
-  - device list: hostname or IP address, one per line (hostname in the form SMA + serial number, e.g. `SMA782354782`);
+  - **Custom IP range** under "Network scan" (optional): when ticked, only the given range is scanned instead of the
+    subnet of the selected adapter, e.g. `192.168.1.1-255`, `192.168.1.10-192.168.1.50`, `192.168.1.0/24` (several ranges
+    separated by commas, up to 1024 addresses);
+  - device list: IP address or serial number, one per line (`782354782` and `SMA782354782` both work);
   - temporary Windows Firewall rule (administrator only).
 - **Right panel:**
   - verdict (e.g. "Problems detected") with the most important errors;
@@ -69,7 +70,8 @@ The whole folder (start file + `app`) can be copied, for example to a USB stick.
   - **Show problems only** filters the list;
   - **Copy results** copies the results as text to the clipboard (e.g. for a ticket or e-mail);
   - **Save HTML report** saves the report;
-  - **Restart as administrator** is in the window header;
+  - **About** (window header) opens this documentation (`README.txt`);
+  - **Run as administrator** (window header, shown only without administrator rights);
   - **SMA server status** (window header) opens <https://sunnyportal.statuspage.io/> with current outages and
     maintenance on the SMA side. The link is also shown in the portal test results and in the HTML report.
 - Tests run in the background. The window does not freeze and results appear as they come in.
@@ -107,18 +109,32 @@ Checks:
    - NTP with clock offset measurement, and port 9524 (Webconnect / HM-20);
    - control targets (microsoft.com, 1.1.1.1), to tell "no Internet" from "only SMA blocked";
    - link to the SMA server status page.
-2. **Network scan.** Pings every address in the subnet (up to /22), reads the ARP table (SMA MAC prefix
-   `00:40:AD`) and runs Speedwire discovery (multicast). Discovery also finds devices in the same network segment
-   that have an IP address from **another subnet**. This is a typical reason why the master does not see a device.
-3. **Speedwire multicast.** Joins the group 239.12.255.254:9522, sends discovery and listens. Shows:
+2. **Network scan.** Pings every address in the subnet (up to /22) or in the custom IP range, reads the ARP table, runs Speedwire
+   discovery (multicast) and looks up the name of every device found: mDNS (the name the device announces itself)
+   and DNS / NetBIOS (the name registered in the router). SMA devices found in three ways are shown together in the "Scan" group, followed by the list of all devices:
+   - **SMA by name**: devices whose hostname starts with `SMA` followed by a non-letter, e.g. `SMA782354782`
+     (names like "Smart-TV" are not matched);
+   - **SMA by MAC address**: SMA prefixes `00:40:AD`, `00:15:BB` (IEEE registry) and `AC:19:9F` (used by some
+     SMA inverters);
+   - **SMA via Speedwire only**: devices that answered Speedwire discovery but have neither an SMA name nor an SMA MAC.
+     This also finds devices in the same network segment that have an IP address from **another subnet**, a typical
+     reason why the master does not see a device;
+   - **all devices in the network**: IP, MAC, vendor and name for every device found, with its current state:
+     - **online** (green) means the device answers now: ping, Speedwire or a fresh ARP request (so devices that block
+       ping are also detected);
+     - **offline** means Windows remembers the device from earlier (ARP cache), but it does not answer now. If the same
+       MAC is online at another address, the device got a new IP address.
+
+     Online devices are listed first. Offline SMA devices are also marked in the SMA lists.
+3. **Multicast.** Joins the group 239.12.255.254:9522, sends discovery and listens. Shows:
    - Energy Meter / Sunny Home Manager 2.0 with serial number, packet count and the longest gap;
    - devices answering discovery, and hosts sending discovery themselves (probably the master);
    - gaps in the stream. **A test of 5 min or longer** detects IGMP snooping without a querier: multicast
      disappears after a few minutes;
    - Windows Firewall state and network profile (in the Public profile a false negative is possible).
-4. **Devices in the local network (hostname / IP)**
+4. **Devices in the local network (IP / serial number)**
    - name resolution via DNS, mDNS (`.local`) and NetBIOS/LLMNR, detecting inconsistent (stale) entries;
-   - subnet, APIPA, ping and ARP/MAC (prefix `00:40:AD` = SMA);
+   - subnet, APIPA, ping and ARP/MAC (SMA prefix, see above);
    - ports 443, 80 and 502, and a Speedwire request to the device;
    - **web interface** (HTTPS) at every address the browser can use to open it, with a summary of which
      addresses work:
@@ -140,15 +156,12 @@ These are defined in the CONFIGURATION section at the top of `app\SMA-NetCheck.p
 | Service | Address | Port |
 |---|---|---|
 | ennexOS – user interface | ennexos.sunnyportal.com | TCP 443 |
-| ennexOS – data transmission | **ldm-devapi**.sunnyportal.com | TCP 443 |
+| ennexOS – data transmission | ldm-devapi.sunnyportal.com | TCP 443 |
 | Firmware updates | update.sunnyportal.de | TCP 443 |
 | NTP | ntp.sunny-portal.com | UDP 123 |
 | Webconnect 1.5 / SMA SPOT / HM-20 | wco.sunnyportal.com | TCP 9524 |
 | Sunny Portal classic | www.sunnyportal.com | TCP 443 |
 | Speedwire (LAN) | 239.12.255.254 (multicast) | UDP 9522 |
-
-> The SMA article contains the typo "Idm-devapi". The name `idm-devapi.sunnyportal.com` does not exist in DNS;
-> the correct one is `ldm-devapi.sunnyportal.com` (checked 2026-11-12).
 
 ## IPv4 only
 
@@ -162,7 +175,7 @@ If IPv6 is active on the adapter, the results show "IPv4 mode" with the list of 
 
 ## Limitations
 
-- The portal test checks the network from the laptop's point of view. The laptop must be in the same VLAN / port as
+- The portal test checks the network from the devices point of view. The device must be in the same VLAN / port as
   the master, because the firewall may have separate rules for the devices' IP or MAC addresses.
 - Windows Firewall or antivirus software may block incoming multicast. In that case, restart the program as
   administrator (button in the window header; it adds a temporary firewall rule) or accept the firewall prompt.
@@ -183,18 +196,10 @@ powershell -ExecutionPolicy Bypass -File .\app\SMA-NetCheck.ps1 -Mode Full -Lang
 - `-Interface`: adapter alias, index or IP address.
 - Other parameters:
   - `-Device`;
+  - `-ScanRange` (custom IP range for the scan, e.g. `192.168.1.1-255`);
   - `-ListenSeconds`;
   - `-AddFirewallRule` (as administrator);
   - `-Language PL|EN|DE`;
   - `-ReportPath`;
   - `-NoReport`.
 
-### EXE version (optional)
-
-```powershell
-Install-Module ps2exe -Scope CurrentUser
-Invoke-PS2EXE .\app\SMA-NetCheck.ps1 .\SMA-NetCheck.exe -title "SMA NetCheck" -version 1.1.0
-```
-
-EXE files built with PS2EXE are often flagged by antivirus software. The safest option is to sign the EXE with a
-company certificate, or to keep using `.cmd` + `.ps1`.
