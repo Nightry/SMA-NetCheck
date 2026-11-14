@@ -190,7 +190,7 @@ No installation required. Runs on Windows 10 / 11 (Windows PowerShell 5.1).
        with a summary of which addresses work. You can also paste an address
        straight from the browser, e.g. https://SMA782354782.local/
      - for devices in another subnet, a ready-made netsh command that adds a
-       temporary second IP address to the laptop.
+       temporary second IP address to the device.
 
   The HTML report contains all results and a table of required addresses
   and ports to hand over to the customer's network administrator.
@@ -220,7 +220,7 @@ No installation required. Runs on Windows 10 / 11 (Windows PowerShell 5.1).
 -------------------------------------------------------------------------------
 
   SMA devices support IPv4 only, so all tests are forced over IPv4, even if
-  the laptop also has IPv6:
+  the device also has IPv6:
   - all TCP/UDP connections are IPv4 and leave from the selected adapter,
   - names are resolved to IPv4 addresses only, via IPv4 DNS servers,
   - ping, ARP, mDNS, Speedwire and NTP use IPv4 addresses only.
@@ -232,8 +232,8 @@ No installation required. Runs on Windows 10 / 11 (Windows PowerShell 5.1).
   LIMITATIONS
 -------------------------------------------------------------------------------
 
-  - The portal test checks the network from the laptop's point of view. The
-    laptop must be in the same VLAN / port as the master, because the
+  - The portal test checks the network from the device's point of view. The
+    device must be in the same VLAN / port as the master, because the
     firewall may have separate rules for the devices' IP or MAC addresses.
   - Windows Firewall or antivirus software may block incoming multicast. In
     that case restart the program as administrator (button in the window

@@ -144,7 +144,7 @@ Checks:
 
      An address can also be pasted straight from the browser, e.g. `https://SMA782354782.local/`;
    - for devices in another subnet, a ready-made `netsh` command that adds a temporary second IP address to the
-     laptop.
+     device.
 
 The **HTML report** contains all results and a table of required addresses and ports to hand over to the
 customer's network administrator.
@@ -165,7 +165,7 @@ These are defined in the CONFIGURATION section at the top of `app\SMA-NetCheck.p
 
 ## IPv4 only
 
-SMA devices support IPv4 only, so all tests are forced over IPv4, even if the laptop also has IPv6:
+SMA devices support IPv4 only, so all tests are forced over IPv4, even if the device also has IPv6:
 
 - all TCP/UDP connections are IPv4 and leave from the selected adapter;
 - names are resolved to IPv4 addresses only, via IPv4 DNS servers;
