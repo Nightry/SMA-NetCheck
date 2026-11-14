@@ -804,6 +804,7 @@ namespace SmaNetCheck {
     })
 
     $window.Add_ContentRendered({
+        [void](Clear-LeftoverFirewallRule)   # sprzątanie po ewentualnym przerwanym teście
         Update-Adapters
         Set-UiLanguage
         Update-Counts

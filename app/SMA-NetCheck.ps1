@@ -917,9 +917,24 @@ function Receive-Speedwire {
     return , $packets
 }
 
+function Clear-LeftoverFirewallRule {
+    # Reguła pozostawiona po przerwanym teście (np. program zamknięty w Menedżerze zadań, wyłączenie komputera).
+    # Usuwana przy starcie programu i przed testem multicast - tylko jako administrator. Zwraca $true, gdy usunięto.
+    if (-not $script:IsAdmin -or $script:TempRuleAdded) { return $false }
+    try {
+        if (Get-NetFirewallRule -Name $script:TempRuleName -ErrorAction Stop) {
+            Remove-NetFirewallRule -Name $script:TempRuleName -ErrorAction Stop
+            Write-Host (T 'fw.leftover') -ForegroundColor DarkGray
+            return $true
+        }
+    } catch { }
+    return $false
+}
+
 function Test-FirewallForMulticast {
     $cat = T 'cat.multicast'
     $name = T 'res.fw'
+    if (Clear-LeftoverFirewallRule) { Add-Result $cat (T 'res.fw.leftover') 'INFO' (T 'fw.leftover') }
     $profName = switch ($script:Adapter.Category) { 'DomainAuthenticated' { 'Domain' } 'Private' { 'Private' } default { 'Public' } }
     $fp = $null
     try { $fp = Get-NetFirewallProfile -Name $profName -ErrorAction Stop } catch { }
@@ -944,7 +959,10 @@ function Test-FirewallForMulticast {
         }
         if ($add) {
             try {
-                New-NetFirewallRule -Name $script:TempRuleName -DisplayName (T 'fw.rulename') -Direction Inbound -Protocol UDP -LocalPort 9522, 5353 -Action Allow -Profile Any -ErrorAction Stop | Out-Null
+                # Reguła możliwie wąska: tylko ten program (powershell.exe, w którym działa test), tylko bieżący profil sieci
+                $exe = (Get-Process -Id $PID).Path
+                New-NetFirewallRule -Name $script:TempRuleName -DisplayName (T 'fw.rulename') -Description (T 'fw.ruledesc') `
+                    -Direction Inbound -Protocol UDP -LocalPort 9522, 5353 -Program $exe -Profile $profName -Action Allow -ErrorAction Stop | Out-Null
                 $script:TempRuleAdded = $true
                 Add-Result $cat $name 'OK' (T 'res.fw.added.d')
                 return
@@ -1700,6 +1718,7 @@ function Show-Menu {
 if ($MyInvocation.InvocationName -eq '.') { return }
 try {
     Show-Header
+    [void](Clear-LeftoverFirewallRule)   # sprzątanie po ewentualnym przerwanym teście
     $script:Adapter = Select-Adapter -Ask:($script:Interactive -and -not $Interface)
     if (-not $script:Adapter) { return }
     Write-Host (T 'main.using' $script:Adapter.Alias $script:Adapter.IP $script:Adapter.Prefix) -ForegroundColor Green

@@ -128,6 +128,9 @@
     'res.fw.noadmin.h'  = @('Uruchom program jako administrator, aby mógł dodać tymczasową regułę, lub zaakceptuj okno zapory, jeśli się pojawi.', 'Run the program as administrator so it can add a temporary rule, or accept the firewall prompt if it appears.', 'Programm als Administrator starten, damit es eine temporäre Regel anlegen kann, oder die Firewall-Abfrage bestätigen, falls sie erscheint.')
     'fw.removed'        = @('Usunięto tymczasową regułę zapory.', 'Temporary firewall rule removed.', 'Temporäre Firewall-Regel entfernt.')
     'fw.removefail'     = @('Nie udało się usunąć reguły ''{0}'' - usuń ją ręcznie.', 'Could not remove rule ''{0}'' - remove it manually.', 'Regel ''{0}'' konnte nicht entfernt werden - bitte manuell entfernen.')
+    'fw.leftover'       = @('Usunięto regułę zapory pozostawioną po przerwanym teście SMA NetCheck.', 'Removed a firewall rule left over from an interrupted SMA NetCheck test.', 'Von einem abgebrochenen SMA-NetCheck-Test verbliebene Firewall-Regel entfernt.')
+    'res.fw.leftover'   = @('Pozostałość po przerwanym teście', 'Leftover from an interrupted test', 'Rest eines abgebrochenen Tests')
+    'fw.ruledesc'       = @('Tymczasowa reguła SMA NetCheck na czas testu multicast. Usuwana automatycznie; jeśli została, można ją bezpiecznie usunąć.', 'Temporary SMA NetCheck rule for the multicast test. Removed automatically; if it is still here, it can be deleted safely.', 'Temporäre SMA-NetCheck-Regel für den Multicast-Test. Wird automatisch entfernt; falls noch vorhanden, kann sie gefahrlos gelöscht werden.')
 
     # ---------------------------------------------------------------- portal
     'sec.portal'    = @('Test połączenia z portalem SMA (wyjście do Internetu)', 'SMA portal connection test (outbound to the Internet)', 'Test der Verbindung zum SMA-Portal (ausgehend ins Internet)')
